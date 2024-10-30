@@ -1,6 +1,3 @@
-import sys
-sys.path.append("/opt/homebrew/Cellar/graph-tool/2.65/lib/python3.12/site-packages/")
-
 import numpy as np
 import matplotlib.pylab as plt
 import pickle
@@ -281,7 +278,7 @@ def get_spectrum(dataset_name, df, MAX_windows, widths_ref, time_shifts_ref):
                     (a_plus, b_plus), _ = curve_fit(lin_func, ks, list(meandeltak.values()))
                     mean_deltak_fit = lin_func(ks, a_plus, b_plus)
                     ax1.plot(ks, mean_deltak_fit, linewidth = 4, color=chosen_color, label = f'eta = {width/int(mean_tau):.2f} <tau>, nu = {(width-time_shift)/width:.2f}')
-                ax1.axvline(x = np.mean(list(mean_dynamic_degree.values())), linestyle = '--', color=chosen_color, label = f'mean dyn. degree')
+                # ax1.axvline(x = np.mean(list(mean_dynamic_degree.values())), linestyle = '--', color=chosen_color, label = f'mean dyn. degree')
  
                 meandeltak = {}
                 for once, k in enumerate(sorted(delta_n_active_static.keys())):
