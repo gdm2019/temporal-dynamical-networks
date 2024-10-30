@@ -1,3 +1,17 @@
+import sys
+sys.path.append("/opt/homebrew/Cellar/graph-tool/2.65/lib/python3.12/site-packages/")
+
+import numpy as np
+import matplotlib.pylab as plt
+import pickle
+import graph_tool.all as gt
+import pandas as pd
+import statistics as st
+import random
+from scipy import stats
+from scipy.special import gamma, factorial
+from scipy.optimize import curve_fit
+
 def create_dataset_file(dataset_name):
     '''Takes the Netzschleuder repository dataset name of the dataset as an input.
     It creates a Pandas dataframe with timestamps, senders, recipients and undirected edges of the events. 
@@ -15,7 +29,7 @@ def get_g_df(dataset_name):
     '''Takes the Netzschleuder repository dataset name as an input
     Returns the Pandas dataframe with keys 'timestamp', 'sender', 'recipient', as well as 'edge'.'''
     g = gt.collection.ns[dataset_name]
-    g.reindex_edges()
+    # g.reindex_edges()
     print('dataset_name:', dataset_name)
 
     isolated_nodes = [v for v in g.vertices() if v.out_degree() == 0 and v.in_degree() == 0]
@@ -38,7 +52,7 @@ def get_g_df(dataset_name):
     d = {'timestamp': timestamps, 'edge': edge, 'sender': sources, 'recipient': recipients}
 
     df = pd.DataFrame(data=d)
-    return df, dataset_name
+    return df
 
 def df_threshold(df, link_threshold):
     '''It takes a Pandas dataframe with keys timestamp and edge.
@@ -131,7 +145,7 @@ def get_quantities(df, scalar_true, degree_true, interevent_true):
         num_nodes = len(pd.concat([df['sender'],df['recipient']]).unique())
         num_events = len(df)
         period = get_time(tmax-tmin)
-        stuff.append([get_time(tmax), get_time(tmin), num_nodes, num_events, period])
+        stuff.append([tmax, tmin, num_nodes, num_events, period])
 
     if degree_true == True:
         nodes = pd.concat([df['sender'],df['recipient']]).unique()
@@ -144,3 +158,182 @@ def get_quantities(df, scalar_true, degree_true, interevent_true):
         agg_interevent_tot = np.concatenate(list(interevent.values()))
         stuff.append([interevent, agg_interevent_tot])
     return stuff
+
+def generate_log_bins(min_value, max_value, multiplier):
+    '''INPUTS: minimum and maximum of the coordinate over which the binning is wished to be performed, as well as a multiplier for the increment of the size of the bins. For example, multiplier = 2.5.
+    OUTPUT = array containing the log bins.'''
+    bins = [min_value]
+    cur_value = bins[0]
+    while cur_value < max_value:
+        if cur_value * multiplier < max_value: cur_value = cur_value * multiplier
+        else: cur_value = max_value
+        bins.append(cur_value)
+    return np.array(bins)
+
+def plot_ccdf(data, ax, label=None, col=None):
+    """
+    Plot on the axes object the complementary cumulative distribution function
+    (1-CDF(x)) based on the raw data.
+    """
+    sorted_vals = np.sort(np.unique(data))
+    ccdf = np.zeros(len(sorted_vals))
+    n = float(len(data))
+    for i, val in enumerate(sorted_vals):
+        ccdf[i] = np.sum(data >= val)/n
+    ax.plot(sorted_vals, ccdf, "-", linewidth=4, label=label, color= col)
+
+def lin_func(x, a, b):
+    y = []
+    for coor in x:
+        y.append(a * coor + b)
+    return y
+
+def get_spectrum(dataset_name, df, MAX_windows, widths_ref, time_shifts_ref):
+    [tmax, tmin, _, _, _], [nodes, edges, agg_degree], [interevent, agg_interevent_tot] = get_quantities(df, True, True, True)
+
+    mean_tau = np.mean(agg_interevent_tot)
+    ref = int(mean_tau)
+    widths = ref*np.array(widths_ref)
+    widths = widths.astype(int)
+    time_shifts = ref*np.array(time_shifts_ref)
+    time_shifts = time_shifts.astype(int)
+
+    colors = ['navy', 'dodgerblue', 'darkorange']
+
+    fig0, ax0 = plt.subplots(figsize=(10, 6))
+    fig1, ax1 = plt.subplots(figsize=(10, 6))
+    fig2, ax2 = plt.subplots(figsize=(10, 6))
+    fig3, ax3 = plt.subplots(figsize=(10, 6))
+
+    for iter_windows in range(len(widths)):
+
+        width = widths[iter_windows]
+        time_shift = time_shifts[iter_windows]
+        chosen_color = colors[iter_windows]
+
+        if width >= time_shift: 
+            number_windows = int((tmax-tmin)/(time_shift) - (width-time_shift)/time_shift)
+            print('number_windows:', number_windows)
+
+            if number_windows >= 2: 
+                activity = {}
+                delta_activity = {}
+                dynamic_degree = {}
+                index = 0
+                end_t = tmin
+                while end_t <= tmax and index <= MAX_windows:
+                    start_t = tmin + time_shift*index
+                    end_t = start_t + width
+                    # I should be able to transform activity, delta_activity as 2d arrays.
+                    df_window = df[(df['timestamp'] >= start_t) & (df['timestamp'] < end_t)]
+                    dynamic_degree[index] = compute_unique_neighbors(df_window)
+                    for edge in edges:
+                        if edge in list(df_window['edge'].drop_duplicates()):
+                            activity[edge, end_t] = 1
+                        else:
+                            activity[edge, end_t] = 0
+                        if index > 0:
+                            delta_activity[edge, end_t] = activity[edge, end_t] -  activity[edge, end_t - time_shift]
+                    index += 1
+
+                mean_dynamic_degree = {}
+                for dict in dynamic_degree.values():
+                    for individual, its_degree in dict.items():
+                        mean_dynamic_degree[individual] = np.mean(its_degree)
+
+                times = np.unique([time for _, time in activity.keys()])
+                n_active = {}
+                delta_n_active = {}
+                delta_n_active_static = {}
+                delta_n_active_mean_dynamic = {}
+
+                for ind in nodes: 
+                    lines = df[(df['sender'] == ind) | (df['recipient'] == ind)]
+                    aux = list(lines['edge'].drop_duplicates())
+                    iter = 0
+                    for time_point in times:
+                        n_active[ind, time_point] = np.sum([activity[e, time_point] == 1 for e in aux]) #np.sum(activity[aux, time_point] == 1)
+                        if iter > 0:
+                            delta_k = n_active[ind, time_point] - n_active[ind, time_point - time_shift]
+                            if n_active[ind, time_point - time_shift] not in delta_n_active:
+                                delta_n_active[n_active[ind, time_point - time_shift]] = []
+                            delta_n_active[n_active[ind, time_point - time_shift]].append(delta_k)
+                            if agg_degree[ind] not in delta_n_active_static:
+                                delta_n_active_static[agg_degree[ind]] = []
+                            delta_n_active_static[agg_degree[ind]].append(delta_k)
+                            if mean_dynamic_degree[ind] not in delta_n_active_mean_dynamic:
+                                delta_n_active_mean_dynamic[mean_dynamic_degree[ind]] = []
+                            delta_n_active_mean_dynamic[mean_dynamic_degree[ind]].append(delta_k)
+                        iter += 1
+
+                all_deltaks = np.concatenate(list(delta_n_active.values()))
+                x, y = np.unique(all_deltaks, return_counts = True)
+                ax0.bar(x, y/sum(y), alpha = 0.2, color = chosen_color, edgecolor = chosen_color, label = f'eta = {width/int(mean_tau):.2f} <tau>, nu = {(width-time_shift)/width:.2f}')
+                
+                meandeltak = {}
+                for once, k in enumerate(sorted(delta_n_active.keys())):
+                    if once == 0: 
+                        ax1.scatter([k] * len(delta_n_active[k]), delta_n_active[k], color = chosen_color, alpha = 0.1, s = 10)
+                    else: ax1.scatter([k] * len(delta_n_active[k]), delta_n_active[k], color = chosen_color, alpha = 0.1, s = 10)
+                    meandeltak[k] = np.mean(delta_n_active[k])
+                ks = list(meandeltak.keys())
+                if len(ks) > 1: 
+                    (a_plus, b_plus), _ = curve_fit(lin_func, ks, list(meandeltak.values()))
+                    mean_deltak_fit = lin_func(ks, a_plus, b_plus)
+                    ax1.plot(ks, mean_deltak_fit, linewidth = 4, color=chosen_color, label = f'eta = {width/int(mean_tau):.2f} <tau>, nu = {(width-time_shift)/width:.2f}')
+                ax1.axvline(x = np.mean(list(mean_dynamic_degree.values())), linestyle = '--', color=chosen_color, label = f'mean dyn. degree')
+ 
+                meandeltak = {}
+                for once, k in enumerate(sorted(delta_n_active_static.keys())):
+                    if once == 0: 
+                        ax2.scatter([k] * len(delta_n_active_static[k]), delta_n_active_static[k], color = chosen_color, alpha = 0.1, s = 10)
+                    else: ax2.scatter([k] * len(delta_n_active_static[k]), delta_n_active_static[k], color = chosen_color, alpha = 0.1, s = 10)
+                    meandeltak[k] = np.mean(delta_n_active_static[k])
+                ks = list(meandeltak.keys())
+                if len(ks) > 1: 
+                    (a_plus, b_plus), _ = curve_fit(lin_func, ks, list(meandeltak.values()))
+                    mean_deltak_fit = lin_func(ks, a_plus, b_plus)
+                    ax2.plot(ks, mean_deltak_fit, linewidth = 4, color=chosen_color, label = f'eta = {width/int(mean_tau):.2f} <tau>, nu = {(width-time_shift)/width:.2f}')
+                xlim = ax2.get_xlim()
+                x_bisector2 = np.linspace(xlim[0], xlim[1], 100)
+                y_bisector2 = -x_bisector2
+
+                meandeltak = {}
+                for once, k in enumerate(sorted(delta_n_active_mean_dynamic.keys())):
+                    if once == 0: 
+                        ax3.scatter([k] * len(delta_n_active_mean_dynamic[k]), delta_n_active_mean_dynamic[k], color = chosen_color, alpha = 0.1, s = 10)
+                    else: ax3.scatter([k] * len(delta_n_active_mean_dynamic[k]), delta_n_active_mean_dynamic[k], color = chosen_color, alpha = 0.1, s = 10)
+                    meandeltak[k] = np.mean(delta_n_active_mean_dynamic[k])
+                ks = list(meandeltak.keys())
+                if len(ks) > 1: 
+                    (a_plus, b_plus), _ = curve_fit(lin_func, ks, list(meandeltak.values()))
+                    mean_deltak_fit = lin_func(ks, a_plus, b_plus)
+                    ax3.plot(ks, mean_deltak_fit, linewidth = 4, color=chosen_color, label = f'eta = {width/int(mean_tau):.2f} <tau>, nu = {(width-time_shift)/width:.2f}')
+
+    ax0.set_yscale('log')
+    ax0.axvline(x = 0, linewidth = 1, color='black')
+    ax0.set_ylabel('Probability', fontsize = 25)
+    ax0.legend(fontsize = 18)
+    ax0.set_xlabel('degree change', fontsize = 25)
+    ax0.set_title(f'{dataset_name}', fontsize = 22)
+
+    ax1.axhline(y = 0, color='k')
+    ax1.set_ylabel('Degree change', fontsize = 23)
+    ax1.legend(fontsize = 18)
+    ax1.set_xlabel('dynamic degree', fontsize = 25)
+    ax1.plot(x_bisector2, y_bisector2, color='black', label='y = -x')
+    ax1.set_title(f'{dataset_name}', fontsize = 22)
+
+    ax2.axhline(y = 0, color='k')
+    ax2.set_ylabel('Degree change', fontsize = 23)
+    ax2.legend(fontsize = 18)
+    ax2.set_xlabel('static degree k', fontsize = 25)
+    ax2.plot(x_bisector2, y_bisector2, color='black', label='y = -x')
+    ax2.set_title(f'{dataset_name}', fontsize = 22)
+
+    ax3.axhline(y = 0, color='k')
+    ax3.set_ylabel('Degree change', fontsize = 23)
+    ax3.legend(fontsize = 18)
+    ax3.set_xlabel('mean individual dynamic degree', fontsize = 25)
+    ax3.plot(x_bisector2, y_bisector2, color='black', label='y = -x')
+    ax3.set_title(f'{dataset_name}', fontsize = 22)
