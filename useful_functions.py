@@ -13,7 +13,7 @@ def create_dataset_file(dataset_name):
     '''Takes the Netzschleuder repository dataset name of the dataset as an input.
     It creates a Pandas dataframe with timestamps, senders, recipients and undirected edges of the events. 
     The dataframe is saved as a pkl file.'''
-    df_before, dataset_name = get_g_df(dataset_name, 'undirected')
+    df_before, dataset_name = get_df(dataset_name, 'undirected')
 
     cleaned_name = dataset_name.replace("/", "_")
     df_before.to_pickle(f'{cleaned_name}_pandasdf.pkl')
@@ -22,7 +22,7 @@ def create_dataset_file(dataset_name):
     df = df_threshold(df_before, threshold)
     df.to_pickle(f'{cleaned_name}_pandasdf_filtered{threshold}.pkl')
 
-def get_g_df(dataset_name):
+def get_df(dataset_name):
     '''Takes the Netzschleuder repository dataset name as an input
     Returns the Pandas dataframe with keys 'timestamp', 'sender', 'recipient', as well as 'edge'.'''
     g = gt.collection.ns[dataset_name]
@@ -53,7 +53,7 @@ def get_g_df(dataset_name):
 
 def df_threshold(df, link_threshold):
     '''Takes a Pandas dataframe with keys timestamp and edge.
-    Returns a filter dataset, where edges that have less than link_threshold occurrences in the original dataframe are taken out.'''
+    Returns a filtered dataset, where edges that have less than link_threshold occurrences in the original dataframe are taken out.'''
     
     edge_counts = df['edge'].value_counts()
     edges_to_keep = edge_counts[edge_counts >= link_threshold].index
@@ -63,7 +63,7 @@ def df_threshold(df, link_threshold):
 
 def get_time(timestamp):
     '''Assumes that the input timestamp is expressed in seconds.
-    Returns the timestamp in the appriate time unit.'''
+    Returns the timestamp in the appropriate time unit.'''
 
     if timestamp<60:
         per = timestamp
@@ -89,7 +89,7 @@ def get_time(timestamp):
     return unit
 
 def compute_unique_neighbors(df_before):
-    '''Takes a pandas dataframe with keys timestamp, sender, recipient.
+    '''Takes a Pandas dataframe with keys timestamp, sender, recipient.
     For each unique node in the dataset, it returns the count of unique neighbour it has in the whole timeperiod covered by the data.'''
     
     df = df_before.drop_duplicates(subset=['edge'], keep='first')
@@ -132,7 +132,7 @@ def undirected_link_interevent_edge(df):
     return interevent
 
 def get_quantities(df, scalar_true, degree_true, interevent_true):
-    '''Computes tmin, tmax, period of the dataset, the number of nodes, for each of them its aggregateed degree, the total number of events, the edge interevent times and the system interevent times.'''
+    '''Computes tmin, tmax, period of the dataset, the number of nodes, for each of them its aggregateed degree, the total number of events, the edge interevent times and the system interevent time.'''
 
     stuff = []
     if scalar_true == True:
@@ -168,10 +168,8 @@ def generate_log_bins(min_value, max_value, multiplier):
     return np.array(bins)
 
 def plot_ccdf(data, ax, label=None, col=None):
-    """
-    Plots on the axes object the complementary cumulative distribution function
-    (1-CDF(x)) based on the raw data.
-    """
+    '''INPUT: raw data, axes, label of the plot and color of the plot.
+    OUTPU: Plot of the complementary cumulative distribution function (1-CDF(x)).'''
     sorted_vals = np.sort(np.unique(data))
     ccdf = np.zeros(len(sorted_vals))
     n = float(len(data))
@@ -377,7 +375,6 @@ def lin_func(x, a, b):
 #         ax4.set_title(f'{dataset_name}', fontsize = 22)
 
 def get_spectrum(dataset_name, df, MAX_windows, widths_ref, time_shifts_ref, plot1, plot2, plot3, plot4, plot5):
-
     '''INPUTS: dataset_name is the string of the Netzschleuder dataset name, df is the Pandas dataframe with keys timestamp, sender, recipiend and edge, MAX_windows is an upper cutoff in the number of temporal windows that it runs the code for, widths_ref is the vector of factors of the reference mean inter-event time for the width of the memory window, time_shifts_ref is the vector (same length as widths_ref) with the factors of the reference inter-event time.
     OUTPUTS: Plots the frequency of degree change, the degree change as a function of dynamic degree, the degree change as a function of the sattic degree and the degree change as a function of the mean individual dynamic degree.'''
     [tmax, tmin, _, _, _], [nodes, edges, agg_degree], [interevent, agg_interevent_tot] = get_quantities(df, True, True, True)
