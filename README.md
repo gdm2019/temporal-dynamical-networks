@@ -20,3 +20,11 @@ The pre-processed temporal data can be found in the following files:
 - bibsonomy_degree_degree_change_overlap*_MAXwindows1000_eta*.txt for the raw Delta k_n vs k_n points
 - bibsonomy_mean_pop_degree_degree_change_overlap*_MAXwindows1000_eta*.txt for the cyclic trajectory in <Delta k_n> vs <k_n>
 - bibsonomy_slopes_overlap*_MAXwindows1000.txt for the slopes vs overlap
+
+There are three custom libraries:
+- model_misc.py
+
+The code to generate the three figures of the main can be found in the the Jupyter notebook:
+- Figures_main.ipynb
+The code to generate the figures of the Supplementary information can be found in:
+- Figures_SI.ipynb
